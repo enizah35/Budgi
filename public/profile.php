@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/layout.php';
 
 if (!isset($_SESSION['user_id'])) {
     header("Location: signin.php");
@@ -30,6 +31,8 @@ try {
 
         if (empty($name) || empty($surname) || empty($email)) {
             $error_msg = "Veuillez remplir les champs obligatoires.";
+        } elseif (!empty($new_password) && strlen($new_password) < 8) {
+            $error_msg = "Le nouveau mot de passe doit contenir au moins 8 caractères.";
         } else {
             // Update basic info and budget
             $update_stmt = $conn->prepare("UPDATE users SET name = :name, surname = :surname, email = :email, budget_limit = :budget_limit, current_budget = :current_budget WHERE id = :id");
@@ -61,87 +64,64 @@ try {
     }
 
 } catch (PDOException $e) {
-    $error_msg = "Erreur : " . $e->getMessage();
+    $error_msg = "Impossible d'enregistrer le profil (email déjà utilisé ?).";
 }
+
+render_header('Mon profil', 'profile', true);
 ?>
-
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=5">
-    <title>Mon Profil - Budgi</title>
-</head>
-<body>
-    <nav>
-        <a href="gestion.php">Tableau de bord</a>
-        <a href="profile.php" style="color: #254888;">Profil</a>
-        <a href="logout.php">Se déconnecter</a>
-    </nav>
-    <button type="button" aria-label="toggle curtain navigation" class="nav-toggler">
-        <span class="line l1"></span>
-        <span class="line l2"></span>
-        <span class="line l3"></span>
-    </button>
-    <a href="gestion.php"><img src="images/budji transp.png" alt="logo" class="logo1"></a>
-    
-    <div class="titre">
-        <div class="register_box">
-            <h2>Mon Profil</h2>
-            <?php if ($success_msg): ?>
-                <p style="color: green;"><?= htmlspecialchars($success_msg) ?></p>
-            <?php endif; ?>
-            <?php if ($error_msg): ?>
-                <p style="color: red;"><?= htmlspecialchars($error_msg) ?></p>
-            <?php endif; ?>
-
-            <form action="profile.php" method="post" class="register_signin_form">
-                <div class="name_form">
-                    <div class="form-group">
-                        <label for="surname">Prénom</label>
-                        <input type="text" name="surname" id="surname" value="<?= htmlspecialchars($user['surname']) ?>" class="form" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="name">Nom</label>
-                        <input type="text" name="name" id="name" value="<?= htmlspecialchars($user['name']) ?>" class="form" required>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="email">Email</label>
-                    <input type="email" name="email" id="email" value="<?= htmlspecialchars($user['email']) ?>" class="form" required>
-                </div>
-
-                <div class="name_form">
-                    <div class="form-group">
-                        <label for="budget_limit">Limite de budget (€)</label>
-                        <input type="number" step="0.01" name="budget_limit" id="budget_limit" value="<?= htmlspecialchars($user['budget_limit']) ?>" class="form" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="current_budget">Budget actuel (€)</label>
-                        <input type="number" step="0.01" name="current_budget" id="current_budget" value="<?= htmlspecialchars($user['current_budget']) ?>" class="form" required>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="new_password">Nouveau mot de passe (laisser vide pour garder l'actuel)</label>
-                    <input type="password" name="new_password" id="new_password" class="form" placeholder="********">
-                </div>
-
-                <input type="submit" value="Enregistrer les modifications" class="boutton register_signin" style="width: 100%; margin: 20px 0;">
-            </form>
-            
-            <a href="gestion.php" style="text-decoration: none; color: #0e1c36; font-size: 0.9em;">← Retour au tableau de bord</a>
+<div class="auth">
+    <div class="card auth-card wide">
+        <div class="auth-head">
+            <h2>Mon profil</h2>
+            <p>Tes infos et les réglages de ton budget.</p>
         </div>
-    </div>
 
-    <footer>
-        <p>&copy; 2024 Budgi. Tous droits réservés</p>
-    </footer>
-    <script src="script.js"></script>
-</body>
-</html>
+        <?php render_alert($success_msg, 'success'); ?>
+        <?php render_alert($error_msg); ?>
+
+        <form action="profile.php" method="post">
+            <div class="field-row">
+                <div class="field">
+                    <label for="surname">Prénom</label>
+                    <input type="text" name="surname" id="surname" class="input" value="<?= e($user['surname']) ?>" autocomplete="given-name" required>
+                </div>
+                <div class="field">
+                    <label for="name">Nom</label>
+                    <input type="text" name="name" id="name" class="input" value="<?= e($user['name']) ?>" autocomplete="family-name" required>
+                </div>
+            </div>
+            <div class="field">
+                <label for="email">Email</label>
+                <input type="email" name="email" id="email" class="input" value="<?= e($user['email']) ?>" autocomplete="email" required>
+            </div>
+
+            <div class="form-section-title">Budget</div>
+            <div class="field-row">
+                <div class="field">
+                    <label for="budget_limit">Limite mensuelle</label>
+                    <div class="input-euro">
+                        <input type="number" step="0.01" min="1" name="budget_limit" id="budget_limit" class="input" value="<?= e($user['budget_limit']) ?>" required>
+                    </div>
+                </div>
+                <div class="field">
+                    <label for="current_budget">Solde actuel</label>
+                    <div class="input-euro">
+                        <input type="number" step="0.01" name="current_budget" id="current_budget" class="input" value="<?= e($user['current_budget']) ?>" required>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-section-title">Sécurité</div>
+            <div class="field">
+                <label for="new_password">Nouveau mot de passe</label>
+                <input type="password" name="new_password" id="new_password" class="input" placeholder="Laisser vide pour garder l'actuel" minlength="8" autocomplete="new-password">
+            </div>
+
+            <div class="form-actions">
+                <a href="gestion.php" class="btn btn-ghost">Retour</a>
+                <button type="submit" class="btn btn-primary">Enregistrer</button>
+            </div>
+        </form>
+    </div>
+</div>
+<?php render_footer(); ?>

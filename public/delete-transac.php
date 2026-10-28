@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/layout.php';
 
 if (!isset($_SESSION['user_id'])) {
     header("Location: signin.php");
@@ -20,7 +21,7 @@ try {
     $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
     // Get transaction details and verify ownership
-    $stmt = $conn->prepare("SELECT amount FROM transactions WHERE id = :id AND user_id = :user_id");
+    $stmt = $conn->prepare("SELECT amount, type FROM transactions WHERE id = :id AND user_id = :user_id");
     $stmt->execute(['id' => $transaction_id, 'user_id' => $user_id]);
     $transaction = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -34,17 +35,18 @@ try {
         $deleteStmt = $conn->prepare("DELETE FROM transactions WHERE id = :id");
         $deleteStmt->execute(['id' => $transaction_id]);
 
-        // Refund the amount to the user's current budget
-        $updateStmt = $conn->prepare("UPDATE users SET current_budget = current_budget + :amount WHERE id = :user_id");
-        $updateStmt->execute(['amount' => $amount, 'user_id' => $user_id]);
+        // Annule l'effet de la transaction sur le solde
+        $updateStmt = $conn->prepare("UPDATE users SET current_budget = current_budget - :effect WHERE id = :user_id");
+        $updateStmt->execute(['effect' => balance_effect($transaction['type'], $amount), 'user_id' => $user_id]);
 
         $conn->commit();
+        flash($transaction['type'] === 'income'
+            ? "Revenu supprimé, " . euro($amount) . " retirés de ton solde."
+            : "Dépense supprimée, " . euro($amount) . " recrédités sur ton solde.");
     }
-
-    header("Location: gestion.php");
-    exit;
-
 } catch (PDOException $e) {
-    die("Erreur : " . $e->getMessage());
+    flash("Impossible de supprimer cette transaction.", 'error');
 }
-?>
+
+header("Location: gestion.php");
+exit;
