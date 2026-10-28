@@ -1,192 +1,221 @@
 <?php
 session_start();
 
-
-if(!isset($_SESSION['user_id'])) {
-    header("location: signin.php");
+if (!isset($_SESSION['user_id'])) {
+    header("Location: signin.php");
     exit;
 }
 
-$error_msg = "";
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/layout.php';
+
+$error_msg = "";
+$user = [];
+$transactions = [];
+$categoryData = [];
+$spent_month = 0;
+$income_month = 0;
 
 try {
     $conn = new PDO($dsn, $username, $dbpassword);
     $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    $req = $conn->prepare("SELECT budget_limit, current_budget FROM users WHERE id = :user_id ");
+    $req = $conn->prepare("SELECT surname, budget_limit, current_budget, budget_setup_complete FROM users WHERE id = :user_id");
     $req->execute(['user_id' => $_SESSION['user_id']]);
-    $user = $req->fetch((PDO::FETCH_ASSOC));
+    $user = $req->fetch(PDO::FETCH_ASSOC) ?: [];
 
-    $budget_limit = $user['budget_limit'] ?? 0;
-    $current_budget = $user['current_budget'] ?? 0;
-
-    $stmt = $conn->prepare("SELECT * FROM transactions WHERE user_id = :user_id ORDER BY id DESC");
-    $stmt->execute(['user_id' => $_SESSION['user_id']]);
-    $transactions = $stmt->fetchAll((PDO::FETCH_ASSOC));
-
-    // Aggregate data for Chart.js
-    $categoryData = [];
-    foreach ($transactions as $t) {
-        $cat = $t['categorie'];
-        $amt = (float)$t['amount'];
-        if (!isset($categoryData[$cat])) {
-            $categoryData[$cat] = 0;
-        }
-        $categoryData[$cat] += $amt;
+    if (!$user) {
+        header("Location: logout.php");
+        exit;
+    }
+    if ($user['budget_setup_complete'] == 0) {
+        header("Location: set-budget.php");
+        exit;
     }
 
-} catch (PDOException $e) {
-    echo "Erreur de connexion à la base de données: " . $e->getMessage();
-}
-?>
+    $stmt = $conn->prepare("SELECT * FROM transactions WHERE user_id = :user_id ORDER BY date DESC, id DESC");
+    $stmt->execute(['user_id' => $_SESSION['user_id']]);
+    $transactions = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20,700,1,200" />
-    <link rel="stylesheet" href="style.css?v=5">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <title>Tableau de bord</title>
-</head>
-<body>
-    <nav>
-        <a href="gestion.php" style="color: #254888;">Tableau de bord</a>
-        <a href="profile.php" >Profil</a>
-        <a href="logout.php">Se déconnecter</a>
-    </nav>
-    <button type="button" aria-label="toggle curtain navigation" class="nav-toggler">
-        <span class="line l1"></span>
-        <span class="line l2"></span>
-        <span class="line l3"></span>
-    </button>
-<a href="gestion.php"><img src="images/budji transp.png" alt="logo" class="logo1"></a>
-<div class="titre">
-    <h1>Tableau de bord</h1></div>
-    <div class="gestion-page">
-    <div class="contenu">
-        <h3>Votre budget du mois</h3>
-        <p>Limite de dépenses : <strong><?= htmlspecialchars($budget_limit) ?></strong>€</p>
-        <p>Budget actuel : <strong><?= htmlspecialchars($current_budget) ?></strong>€</p>
-        
-        <div style="max-width: 300px; margin: 20px auto;">
-            <canvas id="spendingChart"></canvas>
+    // Dépenses du mois en cours, totales et par catégorie
+    $month = date('Y-m');
+    foreach ($transactions as $t) {
+        if (substr($t['date'], 0, 7) !== $month) {
+            continue;
+        }
+        if ($t['type'] === 'income') {
+            $income_month += (float) $t['amount'];
+            continue;
+        }
+        $spent_month += (float) $t['amount'];
+        $categoryData[$t['categorie']] = ($categoryData[$t['categorie']] ?? 0) + (float) $t['amount'];
+    }
+    arsort($categoryData);
+} catch (PDOException $e) {
+    $error_msg = "Impossible de charger tes données, réessaie dans un instant.";
+}
+
+$budget_limit = (float) ($user['budget_limit'] ?? 0);
+$current_budget = (float) ($user['current_budget'] ?? 0);
+$remaining = $budget_limit - $spent_month;
+$percent = $budget_limit > 0 ? min(100, $spent_month / $budget_limit * 100) : 0;
+$barClass = $percent >= 100 ? 'over' : ($percent >= 80 ? 'warn' : '');
+
+$months = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+$monthLabel = $months[(int) date('n') - 1] . ' ' . date('Y');
+
+$flash = flash();
+
+render_header(
+    'Tableau de bord',
+    'gestion',
+    true,
+    '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>'
+);
+?>
+<div class="dashboard container">
+    <div class="dash-head">
+        <div>
+            <h1>Salut <?= e($user['surname'] ?? '') ?> 👋</h1>
+            <p>Voici où en est ton budget de <?= $monthLabel ?>.</p>
+        </div>
+        <a href="#add" class="btn btn-primary"><span class="icon">add</span>Nouvelle transaction</a>
+    </div>
+
+    <?php if ($flash) render_alert($flash[0], $flash[1]); ?>
+    <?php render_alert($error_msg); ?>
+    <?php if ($percent >= 100): ?>
+        <div class="alert alert-error"><span class="icon">warning</span>Tu as dépassé ta limite mensuelle de <?= euro($budget_limit) ?>. Lève le pied !</div>
+    <?php elseif ($percent >= 80): ?>
+        <div class="alert alert-warning"><span class="icon">info</span>Attention, tu as déjà utilisé <?= round($percent) ?>% de ton budget du mois.</div>
+    <?php endif; ?>
+
+    <div class="stats">
+        <div class="card stat">
+            <div class="stat-label"><span class="icon">account_balance</span>Solde actuel</div>
+            <div class="stat-value<?= $current_budget < 0 ? ' negative' : '' ?>"><?= euro($current_budget) ?></div>
+            <div class="stat-sub">Sur ton compte</div>
+        </div>
+        <div class="card stat">
+            <div class="stat-label"><span class="icon">trending_up</span>Revenus du mois</div>
+            <div class="stat-value positive">+<?= euro($income_month) ?></div>
+            <div class="stat-sub">Job, bourse, famille…</div>
+        </div>
+        <div class="card stat">
+            <div class="stat-label"><span class="icon">shopping_bag</span>Dépensé ce mois</div>
+            <div class="stat-value"><?= euro($spent_month) ?></div>
+            <div class="progress"><div class="progress-bar <?= $barClass ?>" style="width: <?= round($percent, 1) ?>%"></div></div>
+            <div class="stat-sub"><?= round($percent) ?>% de ta limite de <?= euro($budget_limit) ?></div>
+        </div>
+        <div class="card stat">
+            <div class="stat-label"><span class="icon">savings</span>Reste à dépenser</div>
+            <div class="stat-value<?= $remaining < 0 ? ' negative' : '' ?>"><?= euro($remaining) ?></div>
+            <div class="stat-sub">Jusqu'à la fin du mois</div>
         </div>
     </div>
 
-    <div class="new-transac">
-        <h3>Ajouter une nouvelle transaction</h3>
-        <form action="new-transac.php" method="post">
-            <label for="description">Description :</label>
-            <input type="text" id="description" name="description" placeholder="Description..." class="form" required>
-            <label for="montant">Montant :</label>
-            <input type="number" step="0.01" id="amount" name="amount" placeholder="0.00€" class="form" required> 
-            <label for="categorie">Catégorie :</label>
-            <select id="categorie" name="categorie" placeholder="Categorie..." class="form">
-                <option value="Nourriture">Nourriture</option>
-                <option value="Loisirs">Loisirs</option>
-                <option value="Transport">Transport</option>
-                <option value="Santé">Santé</option>
-                <option value="Études">Études</option>
-                <option value="Autres">Autres</option>
-             </select>
-            <input type="submit" value="Ajouter la transaction" class="register_signin boutton" style="margin-left: 3.5vh;">
-        </form>
-    </div>
-    <div class="transac-table">
-        <h3>Vos dernières transactions</h3>
-        <table>
-            <thead>
-                <tr>
-                    <th class="transac-table-title">Description</th>
-                    <th class="transac-table-title">Montant</th>
-                    <th class="transac-table-title">Catégorie</th>
-                    <th class="transac-table-title">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php if (!empty($transactions)): ?>
-                    <?php foreach ($transactions as $transaction): ?>
-                <tr>
-                    <td class="transac-table-title"><?= htmlspecialchars($transaction['description']) ?></td>
-                    <td class="transac-table-title"><?= htmlspecialchars($transaction['amount']) ?></td>
-                    <td class="transac-table-title"><?= htmlspecialchars($transaction['categorie']) ?></td>
-                    <td class="transac-table-title">
-                        <a href="edit-transac.php?id=<?= $transaction['id'] ?>" class="action-btn edit-btn">Modifier</a>
-                        <a href="delete-transac.php?id=<?= $transaction['id'] ?>" class="action-btn delete-btn" onclick="return confirm('Êtes-vous sûr de vouloir supprimer cette transaction ?')">Supprimer</a>
-                    </td>
-                </tr>
-                <?php endforeach ?>
+    <div class="dash-grid">
+        <div class="dash-side">
+            <div class="card" id="add">
+                <div class="card-header"><h3>Nouvelle transaction</h3></div>
+                <form action="new-transac.php" method="post">
+                    <?php render_type_picker(); ?>
+                    <div class="field">
+                        <label for="amount">Montant</label>
+                        <div class="input-euro">
+                            <input type="number" step="0.01" min="0.01" id="amount" name="amount" class="input" placeholder="0,00" inputmode="decimal" required>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label for="description">Description</label>
+                        <input type="text" id="description" name="description" class="input" placeholder="Ex : courses, salaire…" maxlength="100" required>
+                    </div>
+                    <button type="submit" class="btn btn-mint btn-block" data-submit-label><span class="icon">add</span><span class="label">Ajouter</span></button>
+                </form>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><h3>Répartition du mois</h3></div>
+                <?php if ($categoryData): ?>
+                    <div class="chart-wrap"><canvas id="spendingChart" height="240"></canvas></div>
+                    <ul class="chart-legend">
+                        <?php foreach ($categoryData as $cat => $amount): ?>
+                            <li>
+                                <span class="dot" style="background: <?= CATEGORIES[$cat][1] ?? '#64748b' ?>"></span>
+                                <?= e($cat) ?>
+                                <span class="amount"><?= euro($amount) ?></span>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
                 <?php else: ?>
-                    <tr>
-                        <td colspan="4">Aucune transaction n'a été ajoutée pour le moment.</td>
-                    </tr>
-                    <?php endif; ?>
-            </tbody>
-        </table>
+                    <div class="empty"><span class="icon">donut_large</span><p>Aucune dépense ce mois-ci.</p></div>
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3>Historique</h3>
+                <span class="count-badge"><?= count($transactions) ?> transaction<?= count($transactions) > 1 ? 's' : '' ?></span>
+            </div>
+            <?php if ($transactions): ?>
+                <ul class="tx-list">
+                    <?php foreach ($transactions as $t):
+                        $income = $t['type'] === 'income';
+                        $cat = categories_for($t['type'])[$t['categorie']] ?? ['more_horiz', '#64748b']; ?>
+                        <li class="tx" style="--cat: <?= $cat[1] ?>">
+                            <span class="tx-icon"><span class="icon"><?= $cat[0] ?></span></span>
+                            <div class="tx-main">
+                                <div class="tx-title"><?= e($t['description']) ?></div>
+                                <div class="tx-meta"><?= e($t['categorie']) ?> · <?= date('d/m/Y', strtotime($t['date'])) ?></div>
+                            </div>
+                            <span class="tx-amount<?= $income ? ' positive' : '' ?>"><?= $income ? '+' : '−' ?><?= euro($t['amount']) ?></span>
+                            <div class="tx-actions">
+                                <a href="edit-transac.php?id=<?= (int) $t['id'] ?>" class="icon-btn" title="Modifier" aria-label="Modifier"><span class="icon">edit</span></a>
+                                <a href="delete-transac.php?id=<?= (int) $t['id'] ?>" class="icon-btn danger" title="Supprimer" aria-label="Supprimer" data-confirm="Supprimer « <?= e($t['description']) ?> » ? Ton solde sera ajusté."><span class="icon">delete</span></a>
+                            </div>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            <?php else: ?>
+                <div class="empty">
+                    <span class="icon">receipt_long</span>
+                    <p>Aucune transaction pour le moment.<br>Ajoute ta première dépense ou ton premier revenu !</p>
+                </div>
+            <?php endif; ?>
+        </div>
     </div>
 </div>
 
-<footer>
-    <div class="footer-links">
-        <a href="#">Accueil</a>
-        <a href="register.php">S'inscrire</a>
-        <a href="signin.php">Se connecter</a>
-        <a href="#">Mentions légales</a>
-        <a href="#">Politiques de confidentialité</a>
-    </div>
-    <p>&copy; 2024 Budgi. Tous droits réservés</p>
-</footer>
-
-    <script src="script.js"></script>
-    <script>
-        const ctx = document.getElementById('spendingChart').getContext('2d');
-        const categoryLabels = <?= json_encode(array_keys($categoryData)) ?>;
-        const categoryValues = <?= json_encode(array_values($categoryData)) ?>;
-
-        new Chart(ctx, {
-            type: 'pie',
+<?php
+$chartScript = '';
+if ($categoryData) {
+    $colors = array_map(fn($c) => CATEGORIES[$c][1] ?? '#64748b', array_keys($categoryData));
+    $chartScript = '<script>
+    window.addEventListener("DOMContentLoaded", () => {
+        new Chart(document.getElementById("spendingChart"), {
+            type: "doughnut",
             data: {
-                labels: categoryLabels,
+                labels: ' . json_encode(array_keys($categoryData)) . ',
                 datasets: [{
-                    label: 'Dépenses par catégorie (€)',
-                    data: categoryValues,
-                    backgroundColor: [
-                        '#9ee3d1', '#ffb3b3', '#acecdb', '#7bebcd', '#f1f1f1', '#c7e6dd'
-                    ],
-                    borderColor: '#0e1c36',
-                    borderWidth: 1
+                    data: ' . json_encode(array_values($categoryData)) . ',
+                    backgroundColor: ' . json_encode($colors) . ',
+                    borderWidth: 3,
+                    borderColor: "#fff",
+                    hoverOffset: 6
                 }]
             },
             options: {
-                responsive: true,
+                cutout: "68%",
                 plugins: {
-                    legend: {
-                        position: 'bottom',
-                        labels: {
-                            font: {
-                                family: 'Poppins'
-                            }
-                        }
-                    },
-                    title: {
-                        display: true,
-                        text: 'Répartition des dépenses',
-                        font: {
-                            family: 'Poppins',
-                            size: 16,
-                            weight: '600'
-                        }
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: { label: (c) => " " + c.parsed.toLocaleString("fr-FR", { style: "currency", currency: "EUR" }) }
                     }
                 }
             }
         });
-    </script>
-</body>
-</html>
+    });
+    </script>';
+}
+render_footer($chartScript);

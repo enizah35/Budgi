@@ -1,102 +1,72 @@
 <?php
 session_start();
 
-$error_msg = "";
+if (!isset($_SESSION['user_id'])) {
+    header("Location: signin.php");
+    exit;
+}
+
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/layout.php';
 
-if ($_SERVER['REQUEST_METHOD'] == "POST"){
-    $budget_limit = $_POST['budget_limit'];
-    $current_budget = $_POST['current_budget'];
+$error_msg = "";
 
-    if (empty($budget_limit)){
+if ($_SERVER['REQUEST_METHOD'] == "POST") {
+    $budget_limit = $_POST['budget_limit'] ?? '';
+    $current_budget = $_POST['current_budget'] ?? '';
+
+    if ($budget_limit === '' || $budget_limit <= 0) {
         $error_msg = "Veuillez indiquer votre limite de dépenses.";
-    }elseif(empty($current_budget)){
-        $error_msg = "Veuillez indiquer votre budget actuel. ";
+    } elseif ($current_budget === '') {
+        $error_msg = "Veuillez indiquer votre solde actuel.";
     } else {
         try {
             $conn = new PDO($dsn, $username, $dbpassword);
             $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-            if(isset($_SESSION['user_id'])){
-
-                $req = $conn ->prepare("UPDATE users SET budget_limit = :budget_limit, current_budget = :current_budget, budget_setup_complete = 1 WHERE id = :user_id");
-                $req->execute([
-                    'budget_limit' => $budget_limit,
-                    'current_budget' => $current_budget,
-                    'user_id' => $_SESSION['user_id']
-                    
-                ]);
-                header("location: gestion.php");
-                exit;
-        } else {
-            $error_msg = "Vous devez être connecté pour définir un budget";
+            $req = $conn->prepare("UPDATE users SET budget_limit = :budget_limit, current_budget = :current_budget, budget_setup_complete = 1 WHERE id = :user_id");
+            $req->execute([
+                'budget_limit' => $budget_limit,
+                'current_budget' => $current_budget,
+                'user_id' => $_SESSION['user_id']
+            ]);
+            header("Location: gestion.php");
+            exit;
+        } catch (PDOException $e) {
+            $error_msg = "Erreur lors de l'enregistrement, réessaie dans un instant.";
         }
-
-    } catch (PDOException $e) {
-        $error_msg = "Erreur lors de la connexion à la base de données : " . $e->getMessage();
-
-
-    }
     }
 }
 
+render_header('Définir mon budget', '', true);
 ?>
+<div class="auth">
+    <div class="card auth-card">
+        <div class="auth-head">
+            <img src="images/logo-icon.png" alt="" width="50" height="56">
+            <h2>Définissons ton budget</h2>
+            <p>Deux chiffres et c'est parti. Tu pourras les modifier à tout moment.</p>
+        </div>
 
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20,700,1,200" />
-    <link rel="stylesheet" href="style.css?v=3">
-    <title>Mise en place du budget</title>
-</head>
-<body>
-    <nav>
-        <a href="gestion.php">Accueil</a>
-        <a href="profile.php">Profil</a>
-        <a href="logout.php">Se déconnecter</a>
-    </nav>
-    <button type="button" aria-label="toggle curtain navigation" class="nav-toggler">
-        <span class="line l1"></span>
-        <span class="line l2"></span>
-        <span class="line l3"></span>
-    </button>
-<a href="index.html"><img src="images/budji transp.png" alt="logo" class="logo1"></a>
-    <div class="titre">
-        <h2>Commençons par définir votre budget...</h2>
-    </div>
-    <div class="gestion-page">
-    <div class="register_box">
-    <?php if (!empty($error_msg)): ?>
-                <p style="color: red;"><?= htmlspecialchars($error_msg) ?></p>
-            <?php endif; ?>
-        <form action="set-budget.php" method="post" class="register_signin_form">
-            <div class="form-group">
-                <label for="budget_limit">Limite de Dépenses</label>
-                <input type="number" name="budget_limit" id="budget_limit" placeholder="Entrez votre limite de dépenses..." class="form">
-                <label for="budget_current">Budget Actuel</label>
-                <input type="number" name="current_budget" id="current_budget" placeholder="Entrez votre budget actuel..." class="form">
-                <input type="submit" name="submit" value="Définir le Budget !" class="budget boutton">
+        <?php render_alert($error_msg); ?>
+
+        <form action="set-budget.php" method="post">
+            <div class="field">
+                <label for="current_budget">Combien as-tu sur ton compte ?</label>
+                <div class="input-euro">
+                    <input type="number" step="0.01" name="current_budget" id="current_budget" class="input" placeholder="1200" inputmode="decimal" required autofocus>
+                </div>
+                <div class="field-hint">Ton solde actuel, il baissera à chaque dépense.</div>
             </div>
+            <div class="field">
+                <label for="budget_limit">Combien veux-tu dépenser au maximum par mois ?</label>
+                <div class="input-euro">
+                    <input type="number" step="0.01" min="1" name="budget_limit" id="budget_limit" class="input" placeholder="800" inputmode="decimal" required>
+                </div>
+                <div class="field-hint">On te préviendra quand tu t'en approches.</div>
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">C'est parti !<span class="icon">arrow_forward</span></button>
         </form>
     </div>
-    </div>
-<footer>
-    <div class="footer-links">
-        <a href="#">Accueil</a>
-        <a href="register.php">S'inscrire</a>
-        <a href="signin.php">Se connecter</a>
-        <a href="#">Mentions légales</a>
-        <a href="#">Politiques de confidentialité</a>
-    </div>
-    <p>&copy; 2024 Budgi. Tous droits réservés</p>
-</footer>
-
-                <script src="script.js"></script>
-</body>
-</html>
+</div>
+<?php render_footer(); ?>

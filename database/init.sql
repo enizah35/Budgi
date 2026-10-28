@@ -21,3 +21,6 @@ CREATE TABLE IF NOT EXISTS transactions (
     date DATE DEFAULT CURRENT_DATE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Type de transaction : dépense ou revenu
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS type VARCHAR(10) NOT NULL DEFAULT 'expense';
